@@ -1,0 +1,4 @@
+Bibliotecas necessárias:
+requests
+beautifulsoup4
+unidecode
