@@ -3,6 +3,7 @@ import re
 import requests
 from bs4 import BeautifulSoup
 from unidecode import unidecode
+from urllib.parse import urlsplit
 
 def normalize_title(title):
     # Remover acentos
@@ -20,18 +21,6 @@ def normalize_title(title):
     normalized_title = re.sub(r'[\d_]', '', normalized_title)
     return normalized_title.lower()
 
-# Função para obter a extensão da imagem a partir do cabeçalho do conteúdo
-def get_image_extension(response):
-    content_type = response.headers['Content-Type']
-    if 'image/jpeg' in content_type:
-        return '.jpg'
-    elif 'image/png' in content_type:
-        return '.png'
-    elif 'image/gif' in content_type:
-        return '.gif'
-    else:
-        return '.jpg'  # Padrão para jpg se não conseguir determinar
-
 # Cabeçalhos para simular um navegador real
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -43,8 +32,8 @@ pasta_imagens = "get-imagens"
 caminho_salvar = os.path.join(caminho_base, pasta_imagens)
 
 print('Bem vindo ao Get Images!  \né aqui aonde a mágica acontece! 🥷')
-# Verificar se o diretório de imagens existe, senão criar
 print('\n')
+# Verificar se o diretório de imagens existe, senão criar
 if not os.path.exists(caminho_salvar):
     os.makedirs(caminho_salvar)
     print(f"Diretório '{pasta_imagens}' criado em '{caminho_base}'.\n")
@@ -84,8 +73,6 @@ if not cards:
     print("Nenhum card encontrado na página.")
     exit()
 
-# ...
-
 # Iterar sobre os cards e extrair o URL da imagem e o título
 for i, card in enumerate(cards):
     # Encontrar a tag do título dentro do card
@@ -123,8 +110,6 @@ for i, card in enumerate(cards):
         try:
             response_imagem = requests.get(url_imagem, headers=headers, stream=True)
             response_imagem.raise_for_status()  # Isso irá gerar um erro se a requisição falhar
-            # Obter a extensão da imagem
-            extensao = get_image_extension(response_imagem)
         except requests.RequestException as e:
             print(f"Erro ao baixar a imagem do card {i}: {e}")
             continue
@@ -132,6 +117,9 @@ for i, card in enumerate(cards):
         # Normalizar o título para o padrão desejado
         nome_arquivo = normalize_title(title)
 
+        # Obter a extensão da imagem diretamente do URL
+        extensao = os.path.splitext(urlsplit(url_imagem).path)[1]
+        
         # Construir o caminho completo para salvar a imagem
         caminho_completo = os.path.join(caminho_salvar, f"{nome_arquivo}{extensao}")
         with open(caminho_completo, "wb") as file:
@@ -140,7 +128,7 @@ for i, card in enumerate(cards):
 
         print(f"Imagem do card {title} => ( {nome_arquivo}{extensao} )")
     else:
-        print("Título não encontrado para o card {i}.")
+        print(f"Título não encontrado para o card {i}.")
 
 # Mensagem de conclusão
 print(f"\nDownload concluído! Foram baixadas {len(cards)} imagens. Confira suas imagens na pasta 'get-imagens' dentro de 'Downloads'. 🎉")

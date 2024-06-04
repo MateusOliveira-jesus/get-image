@@ -1,0 +1,3 @@
+Executar o comando para salvar as bibliotecas necessarias 
+
+pip install requests beautifulsoup4 unidecode
