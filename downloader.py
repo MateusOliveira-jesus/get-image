@@ -6,50 +6,41 @@ from unidecode import unidecode
 from urllib.parse import urlsplit
 
 def normalize_title(title):
-    # Remover acentos
-    title = unidecode(title)
-    # Remover pontuações e caracteres especiais
-    title = re.sub(r'[^\w\s-]', '', title)
-    # Substituir espaços por hífens
-    normalized_title = title.replace(" ", "-")
-    # Substituir múltiplos hífens por apenas um hífen
-    normalized_title = re.sub(r'-{2,}', '-', normalized_title)
-    # Remover preposições, artigos e outras palavras curtas
+    title = unidecode(title)  # Remove acentos
+    title = re.sub(r'[^\w\s-]', '', title)  # Remove pontuações e caracteres especiais
+    title = re.sub(r'\s+', '-', title)  # Substitui espaços por hífens
     stopwords = ["de", "da", "do", "para", "com", "em", "e", "ou", "a", "o"]
-    normalized_title = "-".join(word for word in normalized_title.split("-") if word.lower() not in stopwords)
-    # Remover números e sublinhados restantes
-    normalized_title = re.sub(r'[\d_]', '', normalized_title)
+    normalized_title = "-".join(word for word in title.split("-") if word.lower() not in stopwords)
+    normalized_title = re.sub(r'[\d_]', '', normalized_title)  # Remove números e sublinhados
+    normalized_title = re.sub(r'-{2,}', '-', normalized_title)  # Substitui múltiplos hífens por um único
+    normalized_title = normalized_title.strip('-')  # Remove hífens no início ou fim
     return normalized_title.lower()
+
+def get_unique_filename(base_path, filename, extension):
+    file_path = os.path.join(base_path, f"{filename}{extension}")
+    counter = 1
+    while os.path.exists(file_path):
+        file_path = os.path.join(base_path, f"{filename}-{counter:02d}{extension}")
+        counter += 1
+    return file_path
 
 # Cabeçalhos para simular um navegador real
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 }
 
-# Caminho onde deseja salvar as imagens
 caminho_base = "c:\\Users\\mateus.jesus\\Downloads"
 pasta_imagens = "get-imagens"
 caminho_salvar = os.path.join(caminho_base, pasta_imagens)
 
-print('Bem vindo ao Get Images!  \né aqui aonde a mágica acontece! 🥷')
-print('\n')
-# Verificar se o diretório de imagens existe, senão criar
 if not os.path.exists(caminho_salvar):
     os.makedirs(caminho_salvar)
-    print(f"Diretório '{pasta_imagens}' criado em '{caminho_base}'.\n")
 
-# Perguntar ao usuário sobre a classe dos cards, classe do título e link
-class_cards = input("Por favor, digite o nome da classe dos cards: ") 
-print('\n')
+class_cards = input("Por favor, digite o nome da classe dos cards: ")
 class_title = input("Por favor, digite o nome da classe ou tag do título dos cards: ")
-print('\n')
 url = input("Por favor, digite o link da página da web onde os cards estão localizados: ")
-print('\n')
 
-# Perguntar se o usuário deseja buscar imagens pela tag img ou pelo background
 search_type = input("Deseja buscar imagens pela tag img? (sim/não): ").strip().lower()
-print('\n')
-
 background_class = None
 if search_type == 'não':
     background_class = input("Por favor, digite o nome da classe do background: ")
@@ -57,78 +48,69 @@ if search_type == 'não':
 # Fazer a requisição HTTP para a página
 try:
     response = requests.get(url, headers=headers)
-    response.raise_for_status()  # Isso irá gerar um erro se a requisição falhar
+    response.raise_for_status()
 except requests.RequestException as e:
     print(f"Erro ao fazer a requisição para a página: {e}")
     exit()
 
-# Parsear o HTML com BeautifulSoup
 soup = BeautifulSoup(response.text, "html.parser")
-
-# Encontrar todas as tags de classe dos cards na página
 cards = soup.find_all(class_=class_cards)
 
-# Verificar se foram encontrados cards na página
 if not cards:
     print("Nenhum card encontrado na página.")
     exit()
 
-# Iterar sobre os cards e extrair o URL da imagem e o título
-for i, card in enumerate(cards):
-    # Encontrar a tag do título dentro do card
-    title_tag = card.find(class_=class_title) or card.find(class_=class_title, href=True) or card.find("a", class_=class_title)
-    if title_tag:
-        title = title_tag.text.strip()
-        url_imagem = None
+# Função para extrair URL da imagem de diferentes tipos de cards
+def extract_image_url(card):
+    url_imagem = None
+    if search_type == 'sim':
+        img_tag = card.find("img")
+        if img_tag:
+            url_imagem = img_tag.get("src")
+    else:
+        background_div = card.find(class_=background_class)
+        if background_div:
+            style = background_div.get('style', '')
+            match = re.search(r'background(?:-image)?:\s*url\(["\']?(.*?)["\']?\)', style)
+            if match:
+                url_imagem = match.group(1).strip('\'"')
+                url_imagem = re.sub(r'\?.*$', '', url_imagem)
 
-        if search_type == 'sim':
-            img_tag = card.find("img")
+    # Tentativa adicional de encontrar imagem dentro de `<picture>`
+    if not url_imagem:
+        picture_tag = card.find("picture")
+        if picture_tag:
+            img_tag = picture_tag.find("img")
             if img_tag:
                 url_imagem = img_tag.get("src")
-            else:
-                print(f"Imagem não encontrada para o card {i}.")
+    return url_imagem
+
+for i, card in enumerate(cards):
+    title_tag = card.find(class_=class_title) or card.find("a", class_=class_title)
+    if not title_tag:
+        title_tag = card.find("div", {"data-hook": "item-title"})
+    if title_tag:
+        title = title_tag.text.strip()
+        url_imagem = extract_image_url(card)
+        if url_imagem:
+            try:
+                response_imagem = requests.get(url_imagem, headers=headers, stream=True)
+                response_imagem.raise_for_status()
+            except requests.RequestException as e:
+                print(f"Erro ao baixar a imagem do card {i}: {e}")
                 continue
+
+            nome_arquivo = normalize_title(title)
+            extensao = os.path.splitext(urlsplit(url_imagem).path)[1]
+            caminho_completo = get_unique_filename(caminho_salvar, nome_arquivo, extensao)
+            with open(caminho_completo, "wb") as file:
+                for chunk in response_imagem.iter_content(1024):
+                    file.write(chunk)
+
+            print(f"Imagem do card {title} => ({os.path.basename(caminho_completo)})")
         else:
-            background_div = card.find(class_=background_class)
-            if background_div:
-                style = background_div.get('style', '')
-                print(f"Card {i} - Style encontrado: {style}")  # Adicionado para depuração
-                match = re.search(r'background(?:-image)?:\s*url\(["\']?(.*?)["\']?\)', style)
-                if match:
-                    url_imagem = match.group(1).strip('\'"')
-                    # Corrigir a URL se necessário (remover parâmetros de dimensionamento)
-                    url_imagem = re.sub(r'\?.*$', '', url_imagem)
-                    print(f"Card {i} - URL da imagem de fundo encontrado: {url_imagem}")  # Adicionado para depuração
-                else:
-                    print(f"Background não encontrado para o card {i}.")
-                    continue
-            else:
-                print(f"Div de background não encontrada para o card {i}.")
-                continue
-
-        # Baixar a imagem
-        try:
-            response_imagem = requests.get(url_imagem, headers=headers, stream=True)
-            response_imagem.raise_for_status()  # Isso irá gerar um erro se a requisição falhar
-        except requests.RequestException as e:
-            print(f"Erro ao baixar a imagem do card {i}: {e}")
-            continue
-
-        # Normalizar o título para o padrão desejado
-        nome_arquivo = normalize_title(title)
-
-        # Obter a extensão da imagem diretamente do URL
-        extensao = os.path.splitext(urlsplit(url_imagem).path)[1]
-        
-        # Construir o caminho completo para salvar a imagem
-        caminho_completo = os.path.join(caminho_salvar, f"{nome_arquivo}{extensao}")
-        with open(caminho_completo, "wb") as file:
-            for chunk in response_imagem.iter_content(1024):
-                file.write(chunk)
-
-        print(f"Imagem do card {title} => ( {nome_arquivo}{extensao} )")
+            print(f"URL da imagem não encontrada para o card {i}.")
     else:
         print(f"Título não encontrado para o card {i}.")
 
-# Mensagem de conclusão
-print(f"\nDownload concluído! Foram baixadas {len(cards)} imagens. Confira suas imagens na pasta 'get-imagens' dentro de 'Downloads'. 🎉")
+print(f"\nDownload concluído! Confira suas imagens na pasta 'get-imagens' dentro de 'Downloads'. 🎉")
