@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 from unidecode import unidecode
 from urllib.parse import urlsplit
+from PyInquirer import prompt, Separator
 
 def normalize_title(title):
     title = unidecode(title)  # Remove acentos
@@ -36,37 +37,83 @@ caminho_salvar = os.path.join(caminho_base, pasta_imagens)
 if not os.path.exists(caminho_salvar):
     os.makedirs(caminho_salvar)
 
-class_cards = input("Por favor, digite o nome da classe dos cards: ")
-class_title = input("Por favor, digite o nome da classe ou tag do título dos cards: ")
-url = input("Por favor, digite o link da página da web onde os cards estão localizados: ")
+def ask_questions():
+    questions = [
+        {
+            'type': 'input',
+            'name': 'class_cards',
+            'message': 'Por favor, digite o nome da classe dos cards:',
+        },
+        {
+            'type': 'input',
+            'name': 'class_or_tag_title',
+            'message': 'Por favor, digite o nome da classe ou tag do título dos cards:',
+        },
+        {
+            'type': 'input',
+            'name': 'url',
+            'message': 'Por favor, digite o link da página da web onde os cards estão localizados:',
+        },
+        {
+            'type': 'list',
+            'name': 'search_type',
+            'message': 'Deseja buscar imagens pela tag img?',
+            'choices': [
+                'sim',
+                'não'
+            ]
+        },
+        {
+            'type': 'list',
+            'name': 'image_attr',
+            'message': 'Deseja buscar a URL da imagem em "src" ou "srcset"?',
+            'choices': [
+                'src',
+                'srcset'
+            ]
+        }
+    ]
+    return prompt(questions)
 
-search_type = input("Deseja buscar imagens pela tag img? (sim/não): ").strip().lower()
-background_class = None
-if search_type == 'não':
-    background_class = input("Por favor, digite o nome da classe do background: ")
+def ask_additional_questions():
+    background_class = None
+    srcset_position = None
 
-# Fazer a requisição HTTP para a página
-try:
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-except requests.RequestException as e:
-    print(f"Erro ao fazer a requisição para a página: {e}")
-    exit()
+    if answers['search_type'] == 'não':
+        background_class_question = [
+            {
+                'type': 'input',
+                'name': 'background_class',
+                'message': 'Por favor, digite o nome da classe do background:',
+            }
+        ]
+        background_class = prompt(background_class_question)['background_class']
 
-soup = BeautifulSoup(response.text, "html.parser")
-cards = soup.find_all(class_=class_cards)
+    if answers['image_attr'] == 'srcset':
+        srcset_position_question = [
+            {
+                'type': 'input',
+                'name': 'srcset_position',
+                'message': 'Digite a posição da URL no "srcset" (0 para a primeira, 1 para a segunda, etc.):',
+            }
+        ]
+        srcset_position = int(prompt(srcset_position_question)['srcset_position'])
 
-if not cards:
-    print("Nenhum card encontrado na página.")
-    exit()
+    return background_class, srcset_position
 
-# Função para extrair URL da imagem de diferentes tipos de cards
-def extract_image_url(card):
+def extract_image_url(card, search_type, image_attr, srcset_position, background_class):
     url_imagem = None
     if search_type == 'sim':
         img_tag = card.find("img")
         if img_tag:
-            url_imagem = img_tag.get("src")
+            if image_attr == 'src':
+                url_imagem = img_tag.get("src")
+            elif image_attr == 'srcset':
+                srcset = img_tag.get("srcset")
+                if srcset:
+                    urls = [src.split()[0] for src in srcset.split(",")]
+                    if 0 <= srcset_position < len(urls):
+                        url_imagem = urls[srcset_position]
     else:
         background_div = card.find(class_=background_class)
         if background_div:
@@ -76,41 +123,104 @@ def extract_image_url(card):
                 url_imagem = match.group(1).strip('\'"')
                 url_imagem = re.sub(r'\?.*$', '', url_imagem)
 
-    # Tentativa adicional de encontrar imagem dentro de `<picture>`
     if not url_imagem:
         picture_tag = card.find("picture")
         if picture_tag:
             img_tag = picture_tag.find("img")
             if img_tag:
-                url_imagem = img_tag.get("src")
+                if image_attr == 'src':
+                    url_imagem = img_tag.get("src")
+                elif image_attr == 'srcset':
+                    srcset = img_tag.get("srcset")
+                    if srcset:
+                        urls = [src.split()[0] for src in srcset.split(",")]
+                        if 0 <= srcset_position < len(urls):
+                            url_imagem = urls[srcset_position]
     return url_imagem
 
-for i, card in enumerate(cards):
-    title_tag = card.find(class_=class_title) or card.find("a", class_=class_title)
-    if not title_tag:
-        title_tag = card.find("div", {"data-hook": "item-title"})
-    if title_tag:
-        title = title_tag.text.strip()
-        url_imagem = extract_image_url(card)
-        if url_imagem:
-            try:
-                response_imagem = requests.get(url_imagem, headers=headers, stream=True)
-                response_imagem.raise_for_status()
-            except requests.RequestException as e:
-                print(f"Erro ao baixar a imagem do card {i}: {e}")
-                continue
+def retry_with_new_classes():
+    print("Vamos tentar novamente com novas classes ou tags.")
+    return ask_questions()
 
-            nome_arquivo = normalize_title(title)
-            extensao = os.path.splitext(urlsplit(url_imagem).path)[1]
-            caminho_completo = get_unique_filename(caminho_salvar, nome_arquivo, extensao)
-            with open(caminho_completo, "wb") as file:
-                for chunk in response_imagem.iter_content(1024):
-                    file.write(chunk)
+while True:
+    answers = ask_questions()
+    background_class, srcset_position = ask_additional_questions()
 
-            print(f"Imagem do card {title} => ({os.path.basename(caminho_completo)})")
+    try:
+        response = requests.get(answers['url'], headers=headers)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Erro ao fazer a requisição para a página: {e}")
+        continue
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    cards = soup.find_all(class_=answers['class_cards'])
+
+    if not cards:
+        print("Nenhum card encontrado na página. Deseja tentar novamente com outras classes?")
+        retry = prompt([{
+            'type': 'confirm',
+            'name': 'retry',
+            'message': 'Deseja tentar novamente?',
+            'default': True
+        }])
+        if retry['retry']:
+            continue
         else:
-            print(f"URL da imagem não encontrada para o card {i}.")
-    else:
-        print(f"Título não encontrado para o card {i}.")
+            break
 
-print(f"\nDownload concluído! Confira suas imagens na pasta 'get-imagens' dentro de 'Downloads'. 🎉")
+    for i, card in enumerate(cards):
+        title_tag = card.find(class_=answers['class_or_tag_title'])  # Tenta encontrar a classe
+        if not title_tag:  # Se não encontrar a classe, tenta encontrar como tag
+            title_tag = card.find(answers['class_or_tag_title'])
+
+        if not title_tag:
+            print(f"Título não encontrado para o card {i}. Tentando fallback...")
+
+        if title_tag:
+            title = title_tag.text.strip()
+            url_imagem = extract_image_url(card, answers['search_type'], answers['image_attr'], srcset_position, background_class)
+            if url_imagem:
+                try:
+                    response_imagem = requests.get(url_imagem, headers=headers, stream=True)
+                    response_imagem.raise_for_status()
+                except requests.RequestException as e:
+                    print(f"Erro ao baixar a imagem do card {i}: {e}")
+                    continue
+
+                nome_arquivo = normalize_title(title)
+                extensao = os.path.splitext(urlsplit(url_imagem).path)[1]
+                caminho_completo = get_unique_filename(caminho_salvar, nome_arquivo, extensao)
+                with open(caminho_completo, "wb") as file:
+                    for chunk in response_imagem.iter_content(1024):
+                        file.write(chunk)
+
+                print(f"Imagem do card {title} => ({os.path.basename(caminho_completo)})")
+            else:
+                print(f"URL da imagem não encontrada para o card {i}.")
+        else:
+            print(f"Título não encontrado para o card {i}.")
+            retry_title_class = prompt([{
+                'type': 'confirm',
+                'name': 'retry',
+                'message': 'Deseja tentar novamente com outra classe ou tag para título?',
+                'default': True
+            }])
+            if retry_title_class['retry']:
+                title_class_input = prompt([{
+                    'type': 'input',
+                    'name': 'class_or_tag_title',
+                    'message': 'Por favor, digite uma nova classe ou tag do título dos cards:',
+                }])
+                answers['class_or_tag_title'] = title_class_input['class_or_tag_title']
+                break
+
+    cont = prompt([{
+        'type': 'confirm',
+        'name': 'continue',
+        'message': 'Deseja continuar com mais cards?',
+        'default': False
+    }])
+    if not cont['continue']:
+        print("Download concluído! Confira suas imagens na pasta 'get-imagens' dentro de 'Downloads'.")
+        break
