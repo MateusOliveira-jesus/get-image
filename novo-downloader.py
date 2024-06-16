@@ -7,13 +7,16 @@ from urllib.parse import urlsplit
 from PyInquirer import prompt
 
 # Função de normalização de título
-def normalize_title(title):
+def normalize_title(title, keep_numbers=False):
     title = unidecode(title)  # Remove acentos
     title = re.sub(r'[^\w\s-]', '', title)  # Remove pontuações e caracteres especiais
     title = re.sub(r'\s+', '-', title)  # Substitui espaços por hífens
     stopwords = ["de", "da", "do", "para", "com", "em", "e", "ou", "a", "o"]
     normalized_title = "-".join(word for word in title.split("-") if word.lower() not in stopwords)
-    normalized_title = re.sub(r'[\d_]', '', normalized_title)  # Remove números e sublinhados
+    
+    if not keep_numbers:
+        normalized_title = re.sub(r'[\d_]', '', normalized_title)  # Remove números e sublinhados
+    
     normalized_title = re.sub(r'-{2,}', '-', normalized_title)  # Substitui múltiplos hífens por um único
     normalized_title = normalized_title.strip('-')  # Remove hífens no início ou fim
     return normalized_title.lower()
@@ -79,6 +82,12 @@ def ask_questions():
                 'src',
                 'srcset'
             ]
+        },
+        {
+            'type': 'confirm',
+            'name': 'keep_numbers',
+            'message': 'Deseja manter a numeração no título da URL da imagem?',
+            'default': False
         }
     ]
     return prompt(questions)
@@ -194,7 +203,6 @@ while True:
             url_imagem = extract_image_url(card, answers['search_type'], answers['image_attr'], srcset_position, background_class)
             if url_imagem:
                 try:
-                   
                     response_imagem = requests.get(url_imagem, headers=headers, stream=True)
                     response_imagem.raise_for_status()
                 except requests.RequestException as e:
@@ -202,7 +210,7 @@ while True:
                     continue
 
                 # Normaliza o título para usar como nome do arquivo
-                nome_arquivo = normalize_title(title)
+                nome_arquivo = normalize_title(title, keep_numbers=answers['keep_numbers'])
                 extensao = os.path.splitext(urlsplit(url_imagem).path)[1]
                 caminho_completo = get_unique_filename(caminho_salvar, nome_arquivo, extensao)
                 with open(caminho_completo, "wb") as file:
@@ -251,10 +259,3 @@ while True:
     print(f"Arquivo PHP salvo em: {php_array_file_path}")
 
 print("Download das imagens concluído.")
-
-
-
-
-
-
-
