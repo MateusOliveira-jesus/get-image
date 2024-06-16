@@ -14,7 +14,7 @@ def normalize_title(title, keep_numbers=False):
     stopwords = ["de", "da", "do", "para", "com", "em", "e", "ou", "a", "o"]
     normalized_title = "-".join(word for word in title.split("-") if word.lower() not in stopwords)
     
-    if not keep_numbers:
+    if  keep_numbers == 'não':
         normalized_title = re.sub(r'[\d_]', '', normalized_title)  # Remove números e sublinhados
     
     normalized_title = re.sub(r'-{2,}', '-', normalized_title)  # Substitui múltiplos hífens por um único
@@ -84,11 +84,13 @@ def ask_questions():
             ]
         },
         {
-            'type': 'confirm',
+            'type': 'list',
             'name': 'keep_numbers',
             'message': 'Deseja manter a numeração no título da URL da imagem?',
-            'default': False
-        }
+            'choices': [
+                'não',
+                'sim'
+            ] }
     ]
     return prompt(questions)
 
