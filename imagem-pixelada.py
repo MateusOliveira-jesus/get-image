@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from unidecode import unidecode
 from urllib.parse import urlsplit
 from PyInquirer import prompt
+from PIL import Image, ImageFilter  # Importar Pillow
 
 # Função de normalização de título
 def normalize_title(title, keep_numbers=False):
@@ -30,6 +31,27 @@ def get_unique_filename(base_path, filename, extension):
         counter += 1
     return file_path
 
+# Função para melhorar e converter a imagem para WebP
+def enhance_and_convert_image(image_path):
+    try:
+        # Abre a imagem usando PIL
+        image = Image.open(image_path)
+
+        # Aplica um filtro de suavização
+        image = image.filter(ImageFilter.SMOOTH_MORE)
+
+        # Converte para WebP
+        webp_path = os.path.splitext(image_path)[0] + '.webp'
+        image.save(webp_path, 'WEBP')
+        print(f"Imagem convertida para WebP: {webp_path}")
+
+        # Remove a imagem original
+        os.remove(image_path)
+        return webp_path
+    except Exception as e:
+        print(f"Erro ao melhorar e converter a imagem: {e}")
+        return None
+
 # Cabeçalhos para simular um navegador real
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -39,9 +61,9 @@ headers = {
 caminho_base = "C:\\Users\\mateu\\Downloads"
 pasta_imagens = "get-imagens"
 caminho_salvar = os.path.join(caminho_base, pasta_imagens)
+
 def print_get_image_banner():
     banner = """
-
 𝕸𝖆𝖙𝖊𝖚𝖘 𝕺𝖑𝖎𝖛𝖊𝖎𝖗𝖆
 
   ____    ___  ______                 ____  ___ ___   ____   ____    ___
@@ -51,13 +73,12 @@ Y   __j /  [_ |      |     _____      |  T | _   _ |Y  o  |Y   __j /  [_
 |  l_ ||   [_   |  |      l_____j     |  | |   |   ||  _  ||  l_ ||   [_
 |     ||     T  |  |                  j  l |   |   ||  |  ||     ||     T
 l___,_jl_____j  l__j                 |____jl___j___jl__j__jl___,_jl_____j
-
-          
     """
     print(banner)
 
 # Chamada da função para exibir o banner no início do script
-print_get_image_banner()    
+print_get_image_banner()
+
 # Verifica se o diretório de salvamento existe, se não, cria
 if not os.path.exists(caminho_salvar):
     os.makedirs(caminho_salvar)
@@ -108,7 +129,17 @@ def ask_questions():
             'choices': [
                 'não',
                 'sim'
-            ] }
+            ]
+        },
+        {
+            'type': 'list',
+            'name': 'enhance_image',
+            'message': 'Deseja melhorar a qualidade das imagens?',
+            'choices': [
+                'sim',
+                'não'
+            ]
+        }
     ]
     return prompt(questions)
 
@@ -172,108 +203,74 @@ def ask_additional_questions():
             {
                 'type': 'input',
                 'name': 'srcset_position',
-                'message': 'Digite a posição da URL no "srcset" (0 para a primeira, 1 para a segunda, etc.):',
+                'message': 'Por favor, digite a posição da imagem desejada no "srcset" (0 para a primeira, 1 para a segunda, etc.):',
             }
         ]
         srcset_position = int(prompt(srcset_position_question)['srcset_position'])
 
     return background_class, srcset_position
 
-# Função principal para realizar o scraping e download das imagens
-while True:
-    answers = ask_questions()
-    background_class, srcset_position = ask_additional_questions()
+# Executa as perguntas para o usuário
+answers = ask_questions()
 
-    try:
-        response = requests.get(answers['url'], headers=headers)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"Erro ao fazer a requisição para a página: {e}")
-        continue
+# Extrai informações das respostas do usuário
+class_cards = answers['class_cards']
+class_or_tag_title = answers['class_or_tag_title']
+url = answers['url']
+search_type = answers['search_type']
+image_attr = answers['image_attr']
+keep_numbers = answers['keep_numbers']
+enhance_image = answers['enhance_image']  # Nova variável para guardar a escolha do usuário
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    cards = soup.find_all(class_=answers['class_cards'])
+background_class, srcset_position = ask_additional_questions()
 
-    if not cards:
-        print("Nenhum card encontrado na página. Deseja tentar novamente com outras classes?")
-        retry = prompt([{
-            'type': 'confirm',
-            'name': 'retry',
-            'message': 'Deseja tentar novamente?',
-            'default': True
-        }])
-        if retry['retry']:
-            continue
-        else:
-            break
+# Faz a solicitação HTTP à página
+response = requests.get(url, headers=headers)
+soup = BeautifulSoup(response.content, 'html.parser')
 
-    for i, card in enumerate(cards):
-        title_tag = card.find(class_=answers['class_or_tag_title'])  # Tenta encontrar a classe
-        if not title_tag:  # Se não encontrar a classe, tenta encontrar como tag
-            title_tag = card.find(answers['class_or_tag_title'])
+# Divide a URL para obter o domínio base
+url_parts = urlsplit(url)
+base_url = f"{url_parts.scheme}://{url_parts.netloc}"
 
-        if not title_tag:
-            print(f"Título não encontrado para o card {i}. Tentando fallback...")
+# Extrai todos os cards da página
+cards = soup.find_all(class_=class_cards)
 
-        if title_tag:
-            title = title_tag.text.strip()
-            base_url = urlsplit(answers['url']).scheme + '://' + urlsplit(answers['url']).netloc
-            url_imagem = extract_image_url(card, answers['search_type'], answers['image_attr'], srcset_position, background_class, base_url)
-            if url_imagem:
-                try:
-                    response_imagem = requests.get(url_imagem, headers=headers, stream=True)
-                    response_imagem.raise_for_status()
-                except requests.RequestException as e:
-                    print(f"Erro ao baixar a imagem do card {i}: {e}")
-                    continue
+# Verifica se foram encontrados cards
+if not cards:
+    print("Nenhum card encontrado com a classe fornecida.")
+    retry_with_new_classes()
+else:
+    # Itera sobre cada card para extrair as imagens
+    for i, card in enumerate(cards, start=1):
+        # Extrai o título do card
+        title_element = card.find(class_=class_or_tag_title)
+        title = title_element.get_text(strip=True) if title_element else f"Imagem_{i}"
+        normalized_title = normalize_title(title, keep_numbers)
 
-                # Normaliza o título para usar como nome do arquivo
-                nome_arquivo = normalize_title(title, keep_numbers=answers['keep_numbers'])
-                extensao = os.path.splitext(urlsplit(url_imagem).path)[1]
-                caminho_completo = get_unique_filename(caminho_salvar, nome_arquivo, extensao)
-                with open(caminho_completo, "wb") as file:
-                    for chunk in response_imagem.iter_content(1024):
-                        file.write(chunk)
+        # Extrai a URL da imagem
+        url_imagem = extract_image_url(card, search_type, image_attr, srcset_position, background_class, base_url)
+        if url_imagem:
+            try:
+                # Faz o download da imagem
+                img_data = requests.get(url_imagem, headers=headers).content
+                # Gera um caminho único para salvar a imagem
+                img_path = get_unique_filename(caminho_salvar, normalized_title, '.jpg')
+                # Salva a imagem
+                with open(img_path, 'wb') as img_file:
+                    img_file.write(img_data)
 
-                # Adiciona os dados ao vetor de imagens
-                vetGetImage.append({'title': title, 'image': os.path.basename(caminho_completo), 'url': nome_arquivo})
+                print(f"Imagem salva: {img_path}")
+                
+                # Se o usuário optou por melhorar a imagem
+                if enhance_image == 'sim':
+                    enhanced_image_path = enhance_and_convert_image(img_path)
+                    if enhanced_image_path:
+                        print(f"Imagem melhorada e salva como WebP: {enhanced_image_path}")
+                        vetGetImage.append(enhanced_image_path)
+                else:
+                    vetGetImage.append(img_path)
+            except Exception as e:
+                print(f"Erro ao salvar a imagem {url_imagem}: {e}")
 
-                print(f"Imagem do card {title} => ({os.path.basename(caminho_completo)})")
-            else:
-                print(f"URL da imagem não encontrada para o card {i}.")
-        else:
-            print(f"Título não encontrado para o card {i}.")
-            retry_title_class = prompt([{
-                'type': 'confirm',
-                'name': 'retry_title_class',
-                'message': 'Deseja tentar novamente com novas classes ou tags?',
-                'default': False
-            }])
-            if retry_title_class['retry_title_class']:
-                answers = retry_with_new_classes()
-            else:
-                break
-
-    # Se houver imagens baixadas, gera o arquivo PHP
-    if vetGetImage:
-        php_array_filename = prompt({
-            'type': 'input',
-            'name': 'php_array_filename',
-            'message': 'Por favor, digite o nome do arquivo PHP (sem extensão):',
-            'default': 'images_array'
-        })['php_array_filename']
-
-        php_array_file_path = os.path.join(caminho_salvar, f"{php_array_filename}.php")
-
-        with open(php_array_file_path, 'w', encoding='utf-8') as php_file:
-            php_file.write("<?php\n")
-            php_file.write(f"$vetGetImage = array (\n")
-            for image in vetGetImage:
-                title_encoded = image['title'].encode('utf-8', 'ignore').decode('utf-8')
-                php_file.write(f"\t['title' => '{title_encoded}', 'image' => '{image['image']}', 'url'=>'{image['url']}'],\n")
-            php_file.write(");\n")
-            php_file.write("?>\n")
-
-        print(f"Arquivo PHP salvo em: {php_array_file_path}")
-
-print("Download das imagens concluído.")
+print("Processo concluído!")
+print(f"Imagens salvas: {vetGetImage}")
