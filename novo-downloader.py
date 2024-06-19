@@ -36,7 +36,7 @@ headers = {
 }
 
 # Configurações de caminho e pasta para salvar imagens
-caminho_base = "C:\\Users\\mateu\\Downloads"
+caminho_base = "c:\\Users\\mateus.jesus\\Downloads"
 pasta_imagens = "get-imagens"
 caminho_salvar = os.path.join(caminho_base, pasta_imagens)
 def print_get_image_banner():

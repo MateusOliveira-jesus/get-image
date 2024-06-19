@@ -1,0 +1,3 @@
+Bibliotecas necesárias
+python 3.11.9
+pip install requests beautifulsoup4 unidecode PyInquirer
